@@ -38,6 +38,7 @@ import (
 	"github.com/cyberkiller/api/internal/db"
 	"github.com/cyberkiller/api/internal/flows"
 	"github.com/cyberkiller/api/internal/images"
+	"github.com/cyberkiller/api/internal/koh"
 	"github.com/cyberkiller/api/internal/koth"
 	"github.com/cyberkiller/api/internal/scoring"
 	"github.com/cyberkiller/api/internal/settings"
@@ -171,6 +172,10 @@ func main() {
 	// Automated King-of-the-Hill: poll KOTH-mode targets for the throne holder and
 	// tick points to them. No client needed - the control plane reads the box.
 	koth.StartKingScanner(ctx)
+	// CYBER-KING arenas: every player gets an agent token + player_flag, and
+	// running arenas are scored on their Tick by reading each hill's KingFile.
+	koh.BackfillCredentials(ctx)
+	koh.StartTicker(ctx)
 
 	// MERIDIAN ships as a bundled example scenario: register its roster and bring
 	// the containers online. The range is static and instructor-managed (no
@@ -339,7 +344,17 @@ func main() {
 		ar.Post("/corp/{ip}/reset", handleCorpReset)
 		ar.Post("/corp/{ip}/test", handleCorpTest)
 		ar.Post("/corp/{ip}/clear-king", handleCorpClearKing)
+		// CYBER-KING arenas, hills, flags and agent credentials
+		koh.AdminRoutes(ar)
 	})
+
+	// The CYBER-KING agent API sits beside the hub router rather than inside it,
+	// so none of the hub middleware (CORS, plain-text rate limits) touches it and
+	// every response uses the agent envelope. KOH_BASE_URL = <API_URL><prefix>.
+	root := chi.NewRouter()
+	root.Mount(koh.BasePath(), koh.Router(clientIP))
+	root.Mount("/", r)
+	log.Printf("CYBER-KING agent API mounted at %s", koh.BasePath())
 
 	addr := os.Getenv("BIND_ADDR")
 	if addr == "" {
@@ -350,7 +365,7 @@ func main() {
 	// WS connections are hijacked so the WriteTimeout doesn't apply to them after upgrade.
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           r,
+		Handler:           root,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
@@ -512,6 +527,9 @@ func handleSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	db.Pool.Exec(ctx, `INSERT INTO scores (player_id) VALUES ($1) ON CONFLICT DO NOTHING`, playerID)
+	if err := koh.EnsureCredentials(ctx, playerID); err != nil {
+		log.Printf("signup: koh credentials for %s: %v", handle, err)
+	}
 	db.Pool.Exec(ctx, `INSERT INTO ticker_events (message) VALUES ($1)`,
 		handle+" joined the arena")
 

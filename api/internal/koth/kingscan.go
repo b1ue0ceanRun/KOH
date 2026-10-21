@@ -67,6 +67,11 @@ func scanKings(ctx context.Context) {
 			COALESCE(EXTRACT(EPOCH FROM (NOW()-king_since))::int, 0)
 		FROM koth_machines
 		WHERE status='active' AND COALESCE(container_id,'') != ''
+		  -- Boxes serving as hills of an unfinished CYBER-KING arena are scored by
+		  -- the koh tick engine (player_flag KingFile, decimal ticks) instead.
+		  AND NOT EXISTS (
+			SELECT 1 FROM koh_hills h JOIN koh_arenas a ON a.id = h.arena_id
+			WHERE h.machine_id = koth_machines.id AND a.status <> 'finished')
 	`)
 	if err != nil {
 		return

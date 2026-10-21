@@ -54,6 +54,7 @@ services:
       SIGNUP_OPEN: ${SIGNUP_OPEN:-true}
       SIGNUP_INVITE_CODE: ${SIGNUP_INVITE_CODE:-}
       CORS_ORIGINS: ${CORS_ORIGINS}
+      KOH_API_PREFIX: ${KOH_API_PREFIX:-/koh/v1}
       UPLOAD_DIR: /opt/cyberkiller/uploads
     ports:
       - "${API_BIND:-8080}:8080"

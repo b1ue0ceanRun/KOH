@@ -10,6 +10,7 @@ const NAV = [
     links: [
       { href: '/',       icon: '⬡', label: 'Dashboard' },
       { href: '/images', icon: '◉', label: 'Targets' },
+      { href: '/arenas', icon: '♛', label: 'CYBER-KING Arenas' },
       { href: '/corp',   icon: '⌬', label: 'MERIDIAN Example' },
     ],
   },

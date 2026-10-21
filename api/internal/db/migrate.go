@@ -264,6 +264,105 @@ func ApplyMigrations(ctx context.Context) {
 		`ALTER TABLE players ADD COLUMN IF NOT EXISTS login_streak INT NOT NULL DEFAULT 0`,
 		`ALTER TABLE players ADD COLUMN IF NOT EXISTS login_streak_max INT NOT NULL DEFAULT 0`,
 		`ALTER TABLE players ADD COLUMN IF NOT EXISTS last_login_date DATE`,
+
+		// ── CYBER-KING agent API (internal/koh) ──────────────────────────────
+		// Per-player agent credentials: api_token authenticates the agent
+		// (Authorization: Bearer), player_flag is what it writes into a KingFile.
+		// Both are minted in Go (crypto/rand) by koh.BackfillCredentials.
+		`ALTER TABLE players ADD COLUMN IF NOT EXISTS api_token TEXT UNIQUE`,
+		`ALTER TABLE players ADD COLUMN IF NOT EXISTS player_flag TEXT UNIQUE`,
+		// An arena is one match: a set of hills scored on a fixed Tick.
+		// pending -> running -> settling -> finished.
+		`CREATE TABLE IF NOT EXISTS koh_arenas (
+			id           BIGSERIAL PRIMARY KEY,
+			arena_code   VARCHAR(64) UNIQUE NOT NULL,
+			description  TEXT NOT NULL DEFAULT '',
+			entrypoints  JSONB NOT NULL DEFAULT '[]',
+			status       VARCHAR(16) NOT NULL DEFAULT 'pending'
+			             CHECK (status IN ('pending','running','settling','finished')),
+			tick_seconds INT NOT NULL DEFAULT 300 CHECK (tick_seconds >= 10),
+			next_tick_at TIMESTAMPTZ,
+			started_at   TIMESTAMPTZ,
+			ended_at     TIMESTAMPTZ,
+			created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		// A hill is a scorable node of an arena, bound to the live target box
+		// (koth_machines row) whose KingFile the tick reads.
+		`CREATE TABLE IF NOT EXISTS koh_hills (
+			id              BIGSERIAL PRIMARY KEY,
+			arena_id        BIGINT NOT NULL REFERENCES koh_arenas(id) ON DELETE CASCADE,
+			hill_code       VARCHAR(64) UNIQUE NOT NULL,
+			machine_id      UUID REFERENCES koth_machines(id) ON DELETE SET NULL,
+			os              VARCHAR(8) NOT NULL DEFAULT 'linux' CHECK (os IN ('linux','windows')),
+			base_score      NUMERIC(14,4) NOT NULL DEFAULT 1 CHECK (base_score >= 0),
+			healthcheck_cmd TEXT NOT NULL DEFAULT '',
+			current_king_id UUID REFERENCES players(id) ON DELETE SET NULL,
+			streak          INT NOT NULL DEFAULT 0,
+			created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS koh_hills_arena ON koh_hills (arena_id)`,
+		`CREATE TABLE IF NOT EXISTS koh_ticks (
+			id          BIGSERIAL PRIMARY KEY,
+			arena_id    BIGINT NOT NULL REFERENCES koh_arenas(id) ON DELETE CASCADE,
+			tick_time   TIMESTAMPTZ NOT NULL,
+			started_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			finished_at TIMESTAMPTZ,
+			UNIQUE (arena_id, tick_time)
+		)`,
+		// Ownership history (claim / takeover / lost). Names are denormalized so
+		// history survives a player being deleted.
+		`CREATE TABLE IF NOT EXISTS koh_hill_changes (
+			id               BIGSERIAL PRIMARY KEY,
+			arena_id         BIGINT NOT NULL REFERENCES koh_arenas(id) ON DELETE CASCADE,
+			hill_id          BIGINT NOT NULL REFERENCES koh_hills(id) ON DELETE CASCADE,
+			tick_id          BIGINT REFERENCES koh_ticks(id) ON DELETE SET NULL,
+			tick_time        TIMESTAMPTZ,
+			before_player_id UUID REFERENCES players(id) ON DELETE SET NULL,
+			after_player_id  UUID REFERENCES players(id) ON DELETE SET NULL,
+			before_name      TEXT,
+			after_name       TEXT,
+			change_type      VARCHAR(16) NOT NULL CHECK (change_type IN ('claim','takeover','lost')),
+			description      TEXT NOT NULL,
+			created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS koh_hill_changes_hill ON koh_hill_changes (hill_id, created_at DESC)`,
+		// Scattered hill flags, submitted via POST /flag_submit for a fixed score.
+		`CREATE TABLE IF NOT EXISTS koh_flags (
+			id         BIGSERIAL PRIMARY KEY,
+			arena_id   BIGINT NOT NULL REFERENCES koh_arenas(id) ON DELETE CASCADE,
+			hill_id    BIGINT NOT NULL REFERENCES koh_hills(id) ON DELETE CASCADE,
+			flag_value TEXT NOT NULL,
+			score      NUMERIC(14,4) NOT NULL DEFAULT 1 CHECK (score >= 0),
+			path       TEXT NOT NULL DEFAULT '',
+			enabled    BOOLEAN NOT NULL DEFAULT true,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			UNIQUE (arena_id, flag_value)
+		)`,
+		// Every scoring event, tick or flag. record_key = "<source_type>:<id>".
+		`CREATE TABLE IF NOT EXISTS koh_score_records (
+			id          BIGSERIAL PRIMARY KEY,
+			source_type VARCHAR(8) NOT NULL CHECK (source_type IN ('tick','flag')),
+			arena_id    BIGINT NOT NULL REFERENCES koh_arenas(id) ON DELETE CASCADE,
+			hill_id     BIGINT REFERENCES koh_hills(id) ON DELETE SET NULL,
+			hill_code   VARCHAR(64) NOT NULL,
+			player_id   UUID NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+			tick_id     BIGINT REFERENCES koh_ticks(id) ON DELETE SET NULL,
+			tick_time   TIMESTAMPTZ,
+			flag_id     BIGINT REFERENCES koh_flags(id) ON DELETE SET NULL,
+			score       NUMERIC(14,4) NOT NULL,
+			detail      JSONB NOT NULL,
+			message     TEXT NOT NULL,
+			created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS koh_score_records_player ON koh_score_records (player_id, created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS koh_score_records_arena ON koh_score_records (arena_id, created_at)`,
+		// One scoring per player per flag: makes resubmission idempotent.
+		`CREATE TABLE IF NOT EXISTS koh_flag_solves (
+			flag_id    BIGINT NOT NULL REFERENCES koh_flags(id) ON DELETE CASCADE,
+			player_id  UUID NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			PRIMARY KEY (flag_id, player_id)
+		)`,
 	}
 	for _, s := range stmts {
 		if _, err := Pool.Exec(ctx, s); err != nil {

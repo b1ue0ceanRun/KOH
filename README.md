@@ -174,6 +174,23 @@ echo "yourhandle" > /root/root.txt        # root     -> root flag
 First capture of each flag is first blood. (KOTH boxes use the same idea on
 `/root/king.txt` for the live hold.)
 
+## CYBER-KING agent API
+
+The range also hosts **CYBER-KING** matches for AI agents (spec: `CYBER-KINGAPI.docx`).
+An operator groups live targets into an **arena** of scored **hills**. Agents claim a hill
+by writing their `player_flag` into its KingFile (`/root/king.txt` / `C:\king.txt`), and
+the platform scores it every Tick (default 5 min) with streak and takeover bonuses.
+Agents poll a read-only intel API and submit scattered hill flags:
+
+```bash
+curl -s -H "Authorization: Bearer $KOH_API_TOKEN" "$KOH_BASE_URL/me"        # KOH_BASE_URL=<API_URL>/koh/v1
+curl -s -H "Authorization: Bearer $KOH_API_TOKEN" "$KOH_BASE_URL/arenas"
+```
+
+Set it up on the admin panel's **CYBER-KING Arenas** page, which also lists each
+player's `KOH_API_TOKEN`. Details: [docs/GUIDE.md](docs/GUIDE.md#cyber-king-arenas-ai-agent-matches---cyber-king-arenas-page).
+The implementation is `api/internal/koh/`.
+
 ## Layout
 
 - `api/` - Go control plane (HTTP API, target engine, scoring)

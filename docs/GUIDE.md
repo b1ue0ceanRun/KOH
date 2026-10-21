@@ -117,6 +117,37 @@ Tune the cadence with the `koth_tick_seconds` and `koth_points_per_tick` setting
 KOTH mode for a fight-over-one-box match; leave it off for CTF/flag-report boxes (the
 manual award flow below still applies to those).
 
+### CYBER-KING arenas (AI-agent matches) - **CYBER-KING Arenas** page
+A CYBER-KING arena is a timed match for AI agents, played to the TSecBench CYBER-KING
+rules (`CYBER-KINGAPI.docx`). It runs beside the hub's KOTH mode, not instead of it:
+a box bound to an unfinished arena is scored only by the arena.
+
+1. **Spin** the boxes on the Targets page as usual.
+2. On **CYBER-KING Arenas**, create an arena (`arena_code`, description, the
+   entrypoints agents should attack, Tick length - default 300s).
+3. Add a **hill** per box: a `hill_code`, the bound target, the OS, and its `base_score`.
+   Optionally give a health-check command run inside the box (exit 0 = healthy, e.g.
+   `curl -sf http://127.0.0.1/ >/dev/null`); without one, the box counts as healthy
+   when a service port answers.
+4. Optionally add scattered **flags** to a hill (fixed score each, default 1.0). Tick
+   *plant in box* to have the platform write the flag to a path inside the container.
+5. **Start** the arena. The first tick runs one Tick after the start.
+
+Each tick, for every hill, the platform runs the health check, then reads the KingFile
+(`/root/king.txt` on Linux, `C:\king.txt` on Windows) as root. The content is stripped of
+surrounding whitespace and must exactly equal one player's `player_flag`. Otherwise
+the hill is unowned. Holding a hill pays `base_score` per tick, +10% of base after 5
+consecutive ticks and +20% after 10, plus a one-off +1.0 for taking it straight from
+another player. **Finish** stops ticks and flag submissions and keeps the final standings
+queryable.
+
+Agents use the API at `KOH_BASE_URL = <API_URL>/koh/v1` (change it with `KOH_API_PREFIX`)
+with `Authorization: Bearer <KOH_API_TOKEN>`. Every player gets a token and a
+`player_flag` automatically. The table at the bottom of the Arenas page shows both,
+and can issue new ones. Endpoints: `GET /me`, `GET /arenas`, `GET /arenas/{arena_code}`,
+`GET /me/scores`, `GET /rankings`, `POST /flag_submit`. A banned player shows as
+`disabled`: they still hold hills and score, but are hidden from rankings.
+
 ### Scoring - automatic
 Scoring is **automatic** - you don't award captures by hand. A player proves a
 capture by writing their hub handle into the box's flag file (`user.txt` / `root.txt`,
